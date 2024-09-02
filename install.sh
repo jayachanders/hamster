@@ -131,7 +131,7 @@ main() {
         cooldown=$(echo "$specific_item" | jq -r '.cooldownSeconds')
 
         # Calculate ROI
-        roi=$(echo "scale=6; $profit / $price" | bc)
+        roi=$(echo "scale=6; $price / $profit " | bc)
 
         echo -e "${purple}============================${rest}"
         echo -e "${green}Specific item to buy:${yellow} $specific_item_id ${green}in section:${yellow} $section${rest}"
@@ -148,7 +148,7 @@ main() {
             https://api.hamsterkombatgame.io/clicker/sync | jq -r '.clickerUser.balanceCoins')
 
         # Check if current balance is above the threshold after purchase and if ROI is acceptable
-        if (( $(echo "$current_balance - $price > $min_balance_threshold" | bc -l) )) && (( $(echo "$roi >= $roi_threshold" | bc -l) )); then
+        if (( $(echo "$current_balance - $price > $min_balance_threshold" | bc -l) )) && (( $(echo "$roi <= $roi_threshold" | bc -l) )); then
             # Attempt to purchase the specific item
             if [ -n "$specific_item_id" ]; then
                 echo -e "${green}Attempting to purchase upgrade '${yellow}$specific_item_id${green}'...${rest}"
@@ -182,7 +182,7 @@ main() {
                 break
             fi
         else
-            if (( $(echo "$roi < $roi_threshold" | bc -l) )); then
+            if (( $(echo "$roi > $roi_threshold" | bc -l) )); then
                 echo -e "${red}ROI of ${cyan}($roi) ${red}is below the threshold ${cyan}($roi_threshold)${red}. Skipping purchase.${rest}"
             else
                 echo -e "${red}Current balance ${cyan}(${current_balance}) ${red}minus price of item ${cyan}(${price}) ${red}is below the threshold ${cyan}(${min_balance_threshold})${red}. Stopping purchases.${rest}"
