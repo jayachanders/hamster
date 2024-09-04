@@ -184,6 +184,7 @@ main() {
         else
             if (( $(echo "$roi > $roi_threshold" | bc -l) )); then
                 echo -e "${red}ROI of ${cyan}($roi) ${red}is below the threshold ${cyan}($roi_threshold)${red}. Skipping purchase.${rest}"
+                exit 0
             else
                 echo -e "${red}Current balance ${cyan}(${current_balance}) ${red}minus price of item ${cyan}(${price}) ${red}is below the threshold ${cyan}(${min_balance_threshold})${red}. Stopping purchases.${rest}"
                 break
