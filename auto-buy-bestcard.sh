@@ -1,6 +1,4 @@
 #!/bin/bash
-# specific_card_id
-# roi_threshold
 
 # Colors
 red='\033[0;31m'
@@ -56,7 +54,7 @@ install_packages
 clear
 
 # Prompt for Authorization
-echo -e "${purple}=======${yellow}Hamster Combat Auto Buy Specific Card with ROI${purple}=======${rest}"
+echo -e "${purple}=======${yellow}Hamster Combat Auto Buy best cards${purple}=======${rest}"
 echo ""
 echo -en "${green}Enter Authorization [${cyan}Example: ${yellow}Bearer 171852....${green}]: ${rest}"
 read -r Authorization
@@ -65,14 +63,6 @@ echo -e "${purple}============================${rest}"
 # Prompt for minimum balance threshold
 echo -en "${green}Enter minimum balance threshold (${yellow}the script will stop purchasing if the balance is below this amount${green}):${rest} "
 read -r min_balance_threshold
-
-# Prompt for specific card ID to purchase
-echo -en "${green}Enter the specific card ID you want to purchase:${rest} "
-read -r specific_card_id
-
-# Prompt for ROI threshold
-echo -en "${green}Enter the minimum acceptable ROI (e.g., 0.05 for 5%):${rest} "
-read -r roi_threshold
 
 # Variables to keep track of total spent and total profit
 total_spent=0
@@ -92,8 +82,8 @@ purchase_upgrade() {
     echo "$response"
 }
 
-# Function to get the specific item
-get_specific_item() {
+# Function to get the best upgrade item
+get_best_item() {
     curl -s -X POST -H "User-Agent: Mozilla/5.0 (Android 12; Mobile; rv:102.0) Gecko/102.0 Firefox/102.0" \
         -H "Accept: */*" \
         -H "Accept-Language: en-US,en;q=0.5" \
@@ -105,7 +95,7 @@ get_specific_item() {
         -H "Sec-Fetch-Mode: cors" \
         -H "Sec-Fetch-Site: same-site" \
         -H "Priority: u=4" \
-        https://api.hamsterkombatgame.io/clicker/upgrades-for-buy | jq -r --arg id "$specific_card_id" '.upgradesForBuy | map(select(.isExpired == false and .isAvailable and .id == $id)) | .[0] | {id: .id, section: .section, price: .price, profitPerHourDelta: .profitPerHourDelta, cooldownSeconds: .cooldownSeconds}'
+        https://api.hamsterkombatgame.io/clicker/upgrades-for-buy | jq -r '.upgradesForBuy | map(select(.isExpired == false and .isAvailable)) | map(select(.profitPerHourDelta != 0 and .price != 0)) | sort_by(-(.profitPerHourDelta / .price))[:1] | .[0] | {id: .id, section: .section, price: .price, profitPerHourDelta: .profitPerHourDelta, cooldownSeconds: .cooldownSeconds}'
 }
 
 # Function to wait for cooldown period with countdown
@@ -122,22 +112,18 @@ wait_for_cooldown() {
 # Main script logic
 main() {
     while true; do
-        # Get the specific item to buy
-        specific_item=$(get_specific_item)
-        specific_item_id=$(echo "$specific_item" | jq -r '.id')
-        section=$(echo "$specific_item" | jq -r '.section')
-        price=$(echo "$specific_item" | jq -r '.price')
-        profit=$(echo "$specific_item" | jq -r '.profitPerHourDelta')
-        cooldown=$(echo "$specific_item" | jq -r '.cooldownSeconds')
-
-        # Calculate ROI
-        roi=$(echo "scale=6; $price / $profit " | bc)
+        # Get the best item to buy
+        best_item=$(get_best_item)
+        best_item_id=$(echo "$best_item" | jq -r '.id')
+        section=$(echo "$best_item" | jq -r '.section')
+        price=$(echo "$best_item" | jq -r '.price')
+        profit=$(echo "$best_item" | jq -r '.profitPerHourDelta')
+        cooldown=$(echo "$best_item" | jq -r '.cooldownSeconds')
 
         echo -e "${purple}============================${rest}"
-        echo -e "${green}Specific item to buy:${yellow} $specific_item_id ${green}in section:${yellow} $section${rest}"
+        echo -e "${green}Best item to buy:${yellow} $best_item_id ${green}in section:${yellow} $section${rest}"
         echo -e "${blue}Price: ${cyan}$price${rest}"
         echo -e "${blue}Profit per Hour: ${cyan}$profit${rest}"
-        echo -e "${blue}ROI: ${cyan}$roi${rest}"
         echo ""
 
         # Get current balanceCoins
@@ -147,14 +133,14 @@ main() {
             -H "Referer: https://hamsterkombat.io/" \
             https://api.hamsterkombatgame.io/clicker/sync | jq -r '.clickerUser.balanceCoins')
 
-        # Check if current balance is above the threshold after purchase and if ROI is acceptable
-        if (( $(echo "$current_balance - $price > $min_balance_threshold" | bc -l) )) && (( $(echo "$roi <= $roi_threshold" | bc -l) )); then
-            # Attempt to purchase the specific item
-            if [ -n "$specific_item_id" ]; then
-                echo -e "${green}Attempting to purchase upgrade '${yellow}$specific_item_id${green}'...${rest}"
+        # Check if current balance is above the threshold after purchase
+        if (( $(echo "$current_balance - $price > $min_balance_threshold" | bc -l) )); then
+            # Attempt to purchase the best upgrade item
+            if [ -n "$best_item_id" ]; then
+                echo -e "${green}Attempting to purchase upgrade '${yellow}$best_item_id${green}'...${rest}"
                 echo ""
 
-                purchase_status=$(purchase_upgrade "$specific_item_id")
+                purchase_status=$(purchase_upgrade "$best_item_id")
 
                 if echo "$purchase_status" | grep -q "error_code"; then
                     wait_for_cooldown "$cooldown"
@@ -164,7 +150,7 @@ main() {
                     total_profit=$(echo "$total_profit + $profit" | bc)
                     current_balance=$(echo "$current_balance - $price" | bc)
 
-                    echo -e "${green}Upgrade ${yellow}'$specific_item_id'${green} purchased successfully at ${cyan}$purchase_time${green}.${rest}"
+                    echo -e "${green}Upgrade ${yellow}'$best_item_id'${green} purchased successfully at ${cyan}$purchase_time${green}.${rest}"
                     echo -e "${green}Total spent so far: ${cyan}$total_spent${green} coins.${rest}"
                     echo -e "${green}Total profit added: ${cyan}$total_profit${green} coins per hour.${rest}"
                     echo -e "${green}Current balance: ${cyan}$current_balance${green} coins.${rest}"
@@ -182,12 +168,8 @@ main() {
                 break
             fi
         else
-            if (( $(echo "$roi > $roi_threshold" | bc -l) )); then
-                echo -e "${red}ROI of ${cyan}($roi) ${red}is below the threshold ${cyan}($roi_threshold)${red}. Skipping purchase.${rest}"
-            else
-                echo -e "${red}Current balance ${cyan}(${current_balance}) ${red}minus price of item ${cyan}(${price}) ${red}is below the threshold ${cyan}(${min_balance_threshold})${red}. Stopping purchases.${rest}"
-                break
-            fi
+            echo -e "${red}Current balance ${cyan}(${current_balance}) ${red}minus price of item ${cyan}(${price}) ${red}is below the threshold ${cyan}(${min_balance_threshold})${red}. Stopping purchases.${rest}"
+            break
         fi
     done
 }
