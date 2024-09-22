@@ -131,7 +131,8 @@ main() {
             -H "Authorization: $Authorization" \
             -H "Origin: https://hamsterkombat.io" \
             -H "Referer: https://hamsterkombat.io/" \
-            https://api.hamsterkombatgame.io/clicker/sync | jq -r '.clickerUser.balanceCoins')
+            https://api.hamsterkombatgame.io/clicker/sync | jq -r '.interludeUser.balanceDiamonds')
+        # https://api.hamsterkombatgame.io/clicker/sync | jq -r '.clickerUser.balanceCoins')
 
         # Check if current balance is above the threshold after purchase
         if (( $(echo "$current_balance - $price > $min_balance_threshold" | bc -l) )); then
