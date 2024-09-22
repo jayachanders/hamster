@@ -124,14 +124,26 @@ main() {
     while true; do
         # Get the specific item to buy
         specific_item=$(get_specific_item)
+
         specific_item_id=$(echo "$specific_item" | jq -r '.id')
         section=$(echo "$specific_item" | jq -r '.section')
-        price=$(echo "$specific_item" | jq -r '.price')
-        profit=$(echo "$specific_item" | jq -r '.profitPerHourDelta')
+        price=$(echo "$specific_item" | jq -r '.price // empty')
+        profit=$(echo "$specific_item" | jq -r '.profitPerHourDelta // empty')
         cooldown=$(echo "$specific_item" | jq -r '.cooldownSeconds')
 
+        # Check for missing or invalid data
+        if [ -z "$specific_item_id" ] || [ -z "$price" ] || [ -z "$profit" ]; then
+            echo -e "${red}Error: Missing or invalid data. Skipping this item.${rest}"
+            break
+        fi
+
         # Calculate ROI
-        roi=$(echo "scale=6; $price / $profit " | bc)
+        if [[ "$price" =~ ^[0-9]+(\.[0-9]+)?$ ]] && [[ "$profit" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+            roi=$(echo "scale=6; $price / $profit " | bc)
+        else
+            echo -e "${red}Error: Invalid price or profit values.${rest}"
+            continue
+        fi
 
         echo -e "${purple}============================${rest}"
         echo -e "${green}Specific item to buy:${yellow} $specific_item_id ${green}in section:${yellow} $section${rest}"
@@ -146,53 +158,44 @@ main() {
             -H "Origin: https://hamsterkombat.io" \
             -H "Referer: https://hamsterkombat.io/" \
             https://api.hamsterkombatgame.io/clicker/sync | jq -r '.interludeUser.balanceDiamonds')
-        # https://api.hamsterkombatgame.io/clicker/sync | jq -r '.clickerUser.balanceCoins')
 
         # Check if current balance is above the threshold after purchase and if ROI is acceptable
         if (( $(echo "$current_balance - $price > $min_balance_threshold" | bc -l) )) && (( $(echo "$roi <= $roi_threshold" | bc -l) )); then
             # Attempt to purchase the specific item
-            if [ -n "$specific_item_id" ]; then
-                echo -e "${green}Attempting to purchase upgrade '${yellow}$specific_item_id${green}'...${rest}"
-                echo ""
+            echo -e "${green}Attempting to purchase upgrade '${yellow}$specific_item_id${green}'...${rest}"
+            echo ""
 
-                purchase_status=$(purchase_upgrade "$specific_item_id")
+            purchase_status=$(purchase_upgrade "$specific_item_id")
 
-                if echo "$purchase_status" | grep -q "error_code"; then
-                    wait_for_cooldown "$cooldown"
-                else
-                    purchase_time=$(date +"%Y-%m-%d %H:%M:%S")
-                    total_spent=$(echo "$total_spent + $price" | bc)
-                    total_profit=$(echo "$total_profit + $profit" | bc)
-                    current_balance=$(echo "$current_balance - $price" | bc)
-
-                    echo -e "${green}Upgrade ${yellow}'$specific_item_id'${green} purchased successfully at ${cyan}$purchase_time${green}.${rest}"
-                    echo -e "${green}Total spent so far: ${cyan}$total_spent${green} coins.${rest}"
-                    echo -e "${green}Total profit added: ${cyan}$total_profit${green} coins per hour.${rest}"
-                    echo -e "${green}Current balance: ${cyan}$current_balance${green} coins.${rest}"
-                    
-                    sleep_duration=$((RANDOM % 8 + 5))
-                    echo -e "${green}Waiting for ${yellow}$sleep_duration${green} seconds before next purchase...${rest}"
-                    while [ $sleep_duration -gt 0 ]; do
-                        echo -ne "${cyan}$sleep_duration\033[0K\r"
-                        sleep 1
-                        ((sleep_duration--))
-                    done
-                fi
+            if echo "$purchase_status" | grep -q "error_code"; then
+                wait_for_cooldown "$cooldown"
             else
-                echo -e "${red}No valid item found to buy.${rest}"
-                break
+                purchase_time=$(date +"%Y-%m-%d %H:%M:%S")
+                total_spent=$(echo "$total_spent + $price" | bc)
+                total_profit=$(echo "$total_profit + $profit" | bc)
+                current_balance=$(echo "$current_balance - $price" | bc)
+
+                echo -e "${green}Upgrade ${yellow}'$specific_item_id'${green} purchased successfully at ${cyan}$purchase_time${green}.${rest}"
+                echo -e "${green}Total spent so far: ${cyan}$total_spent${green} coins.${rest}"
+                echo -e "${green}Total profit added: ${cyan}$total_profit${green} coins per hour.${rest}"
+                echo -e "${green}Current balance: ${cyan}$current_balance${green} coins.${rest}"
+                
+                sleep_duration=$((RANDOM % 8 + 5))
+                echo -e "${green}Waiting for ${yellow}$sleep_duration${green} seconds before next purchase...${rest}"
+                while [ $sleep_duration -gt 0 ]; do
+                    echo -ne "${cyan}$sleep_duration\033[0K\r"
+                    sleep 1
+                    ((sleep_duration--))
+                done
             fi
         else
             if (( $(echo "$roi > $roi_threshold" | bc -l) )); then
-                echo -e "${red}ROI of ${cyan}($roi) ${red}is below the threshold ${cyan}($roi_threshold)${red}. Skipping purchase.${rest}"
-                exit 0
+                echo -e "${red}Error: ROI of ${cyan}$roi${red} exceeds the threshold of ${cyan}$roi_threshold${red}. Skipping...${rest}"
             else
-                echo -e "${red}Current balance ${cyan}(${current_balance}) ${red}minus price of item ${cyan}(${price}) ${red}is below the threshold ${cyan}(${min_balance_threshold})${red}. Stopping purchases.${rest}"
-                break
+                echo -e "${red}Error: Insufficient balance after purchase. Skipping...${rest}"
             fi
         fi
     done
 }
 
-# Execute the main function
 main
