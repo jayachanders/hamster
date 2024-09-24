@@ -64,6 +64,39 @@ echo -e "${purple}============================${rest}"
 echo -en "${green}Enter minimum balance threshold (${yellow}the script will stop purchasing if the balance is below this amount${green}):${rest} "
 read -r min_balance_threshold
 
+# List of ignored card IDs
+ignored_card_ids=("int_year_strategy_1" "int_year_strategy_2" "int_year_strategy_3") # Add more IDs as necessary
+
+# Function to check if an ID is in the ignored list
+is_ignored() {
+    local id="$1"
+    for ignored_id in "${ignored_card_ids[@]}"; do
+        if [[ "$id" == "$ignored_id" ]]; then
+            return 0 # Card is in the ignored list
+        fi
+    done
+    return 1 # Card is not in the ignored list
+}
+
+# Function to define common headers
+headers=(
+    -H 'accept: application/json'
+    -H 'accept-language: en-US,en;q=0.9'
+    -H "authorization: $Authorization"
+    -H 'cache-control: no-cache'
+    -H 'content-type: application/json'
+    -H 'origin: https://hamsterkombatgame.io'
+    -H 'pragma: no-cache'
+    -H 'referer: https://hamsterkombatgame.io/'
+    -H 'sec-ch-ua: "Android";v="12", "Chromium";v="128", "Google Chrome";v="128"'
+    -H 'sec-ch-ua-mobile: ?1'
+    -H 'sec-ch-ua-platform: "Android"'
+    -H 'sec-fetch-dest: empty'
+    -H 'sec-fetch-mode: cors'
+    -H 'sec-fetch-site: same-site'
+    -H 'user-agent: Mozilla/5.0 (Linux; Android 12; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36'
+)
+
 # Variables to keep track of total spent and total profit
 total_spent=0
 total_profit=0
@@ -72,36 +105,33 @@ total_profit=0
 purchase_upgrade() {
     upgrade_id="$1"
     timestamp=$(date +%s%3N)
-    response=$(curl -s -X POST \
-      -H "Content-Type: application/json" \
-      -H "Authorization: $Authorization" \
-      -H "Origin: https://hamsterkombat.io" \
-      -H "Referer: https://hamsterkombat.io/" \
-      -d "{\"upgradeId\": \"$upgrade_id\", \"timestamp\": $timestamp}" \
-      https://api.hamsterkombatgame.io/clicker/buy-upgrade)
+
+    response=$(curl -s -X POST "${headers[@]}" \
+        --data-raw "{\"upgradeId\": \"$upgrade_id\", \"timestamp\": $timestamp}" \
+        https://api.hamsterkombatgame.io/interlude/buy-upgrade)
+
     echo "$response"
 }
 
-# Function to get the best upgrade item
-get_best_item() {
-    curl -s -X POST -H "User-Agent: Mozilla/5.0 (Android 12; Mobile; rv:102.0) Gecko/102.0 Firefox/102.0" \
-        -H "Accept: */*" \
-        -H "Accept-Language: en-US,en;q=0.5" \
-        -H "Referer: https://hamsterkombat.io/" \
-        -H "Authorization: $Authorization" \
-        -H "Origin: https://hamsterkombat.io" \
-        -H "Connection: keep-alive" \
-        -H "Sec-Fetch-Dest: empty" \
-        -H "Sec-Fetch-Mode: cors" \
-        -H "Sec-Fetch-Site: same-site" \
-        -H "Priority: u=4" \
-        https://api.hamsterkombatgame.io/clicker/upgrades-for-buy | jq -r '.upgradesForBuy | map(select(.isExpired == false and .isAvailable)) | map(select(.profitPerHourDelta != 0 and .price != 0)) | sort_by(-(.profitPerHourDelta / .price))[:1] | .[0] | {id: .id, section: .section, price: .price, profitPerHourDelta: .profitPerHourDelta, cooldownSeconds: .cooldownSeconds}'
+# Function to get all available items
+get_available_items() {
+    response=$(curl -s -X POST "${headers[@]}" https://api.hamsterkombatgame.io/interlude/upgrades-for-buy)
+    echo "$response" | jq -r '
+        .upgradesForBuy | 
+        map(select(.isExpired == false and .isAvailable)) | 
+        if any(.price == 0) then 
+            map(select(.price == 0)) 
+        else 
+            map(select(.profitPerHourDelta != 0 and .price > 0) | . + {profitToPrice: (.profitPerHour / .price)}) | 
+            sort_by(-(.profitPerHourDelta / .price)) 
+        end
+    '
 }
 
 # Function to wait for cooldown period with countdown
 wait_for_cooldown() {
     cooldown_seconds="$1"
-    echo -e "${yellow}Upgrade is on cooldown. Waiting for cooldown period of ${cyan}$cooldown_seconds${yellow} seconds...${rest}"
+    echo -e "${yellow}Upgrade is on cooldown. Waiting for ${cyan}$cooldown_seconds${yellow} seconds...${rest}"
     while [ $cooldown_seconds -gt 0 ]; do
         echo -ne "${cyan}$cooldown_seconds\033[0K\r"
         sleep 1
@@ -112,8 +142,30 @@ wait_for_cooldown() {
 # Main script logic
 main() {
     while true; do
-        # Get the best item to buy
-        best_item=$(get_best_item)
+        # Get current balanceCoins
+        current_balance=$(curl -s -X POST "${headers[@]}" https://api.hamsterkombatgame.io/interlude/sync | jq -r '.interludeUser.balanceDiamonds')   
+        
+        # Get all available items
+        available_items=$(get_available_items)
+        
+        # Loop through the available items to find a non-ignored one
+        best_item=""
+        for item in $(echo "$available_items" | jq -c '.[]'); do
+            best_item_id=$(echo "$item" | jq -r '.id')
+            if ! is_ignored "$best_item_id"; then
+                best_item="$item"
+                break
+            else
+                echo -e "${yellow}Skipping ignored card with ID '${cyan}$best_item_id${yellow}'.${rest}"
+            fi
+        done
+        
+        if [ -z "$best_item" ]; then
+            echo -e "${red}No valid item found to buy.${rest}"
+            break
+        fi
+        
+        # Extract item details
         best_item_id=$(echo "$best_item" | jq -r '.id')
         section=$(echo "$best_item" | jq -r '.section')
         price=$(echo "$best_item" | jq -r '.price')
@@ -121,29 +173,26 @@ main() {
         cooldown=$(echo "$best_item" | jq -r '.cooldownSeconds')
 
         echo -e "${purple}============================${rest}"
+        echo -e "${blue}Current Balance: ${cyan}$current_balance${rest}"
         echo -e "${green}Best item to buy:${yellow} $best_item_id ${green}in section:${yellow} $section${rest}"
         echo -e "${blue}Price: ${cyan}$price${rest}"
         echo -e "${blue}Profit per Hour: ${cyan}$profit${rest}"
         echo ""
 
-        # Get current balanceCoins
-        current_balance=$(curl -s -X POST \
-            -H "Authorization: $Authorization" \
-            -H "Origin: https://hamsterkombat.io" \
-            -H "Referer: https://hamsterkombat.io/" \
-            https://api.hamsterkombatgame.io/clicker/sync | jq -r '.interludeUser.balanceDiamonds')
-        # https://api.hamsterkombatgame.io/clicker/sync | jq -r '.clickerUser.balanceCoins')
-
         # Check if current balance is above the threshold after purchase
         if (( $(echo "$current_balance - $price > $min_balance_threshold" | bc -l) )); then
-            # Attempt to purchase the best upgrade item
             if [ -n "$best_item_id" ]; then
+                if [ "$cooldown" -gt 0 ]; then
+                    wait_for_cooldown "$cooldown"
+                fi
+
                 echo -e "${green}Attempting to purchase upgrade '${yellow}$best_item_id${green}'...${rest}"
                 echo ""
 
                 purchase_status=$(purchase_upgrade "$best_item_id")
 
                 if echo "$purchase_status" | grep -q "error_code"; then
+                    echo -e "${red}Error purchasing item. Retrying after cooldown...${rest}"
                     wait_for_cooldown "$cooldown"
                 else
                     purchase_time=$(date +"%Y-%m-%d %H:%M:%S")
