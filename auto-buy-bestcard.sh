@@ -121,8 +121,7 @@ get_best_item() {
         map(select(.isExpired == false and .isAvailable)) | 
         map(select(.profitPerHourDelta != 0 and .price > 0) | . + {profitToPrice: (.profitPerHour / .price)}) | 
         sort_by(-(.profitPerHourDelta / .price)) | 
-        .[0] 
-        end | 
+        .[0] | 
         {id: .id, section: .section, price: .price, profitPerHourDelta: .profitPerHourDelta, cooldownSeconds: .cooldownSeconds}
     '
 }
