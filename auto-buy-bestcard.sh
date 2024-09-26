@@ -110,7 +110,7 @@ get_best_item() {
         else 
             map(select(.profitPerHourDelta != 0 and .price > 0) | . + {profitToPrice: (.profitPerHour / .price)}) | 
             sort_by(-(.profitPerHourDelta / .price)) | 
-            .[0] 
+            .[1] 
         end | 
         {id: .id, section: .section, price: .price, profitPerHourDelta: .profitPerHourDelta, cooldownSeconds: .cooldownSeconds}
     '
