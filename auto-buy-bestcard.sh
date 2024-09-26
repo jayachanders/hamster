@@ -64,20 +64,6 @@ echo -e "${purple}============================${rest}"
 echo -en "${green}Enter minimum balance threshold (${yellow}the script will stop purchasing if the balance is below this amount${green}):${rest} "
 read -r min_balance_threshold
 
-# List of ignored card IDs
-ignored_card_ids=("int_year_strategy_1" "int_year_strategy_2" "int_year_strategy_3") # Add more IDs as necessary
-
-# Function to check if an ID is in the ignored list
-is_ignored() {
-    local id="$1"
-    for ignored_id in "${ignored_card_ids[@]}"; do
-        if [[ "$id" == "$ignored_id" ]]; then
-            return 0 # Card is in the ignored list
-        fi
-    done
-    return 1 # Card is not in the ignored list
-}
-
 # Function to define common headers
 headers=(
     -H 'accept: application/json'
@@ -113,18 +99,20 @@ purchase_upgrade() {
     echo "$response"
 }
 
-# Function to get all available items
-get_available_items() {
+# Function to get the best upgrade item
+get_best_item() {
     response=$(curl -s -X POST "${headers[@]}" https://api.hamsterkombatgame.io/interlude/upgrades-for-buy)
     echo "$response" | jq -r '
         .upgradesForBuy | 
         map(select(.isExpired == false and .isAvailable)) | 
         if any(.price == 0) then 
-            map(select(.price == 0)) 
+            map(select(.price == 0)) | .[1] 
         else 
             map(select(.profitPerHourDelta != 0 and .price > 0) | . + {profitToPrice: (.profitPerHour / .price)}) | 
-            sort_by(-(.profitPerHourDelta / .price)) 
-        end
+            sort_by(-(.profitPerHourDelta / .price)) | 
+            .[0] 
+        end | 
+        {id: .id, section: .section, price: .price, profitPerHourDelta: .profitPerHourDelta, cooldownSeconds: .cooldownSeconds}
     '
 }
 
@@ -144,28 +132,8 @@ main() {
     while true; do
         # Get current balanceCoins
         current_balance=$(curl -s -X POST "${headers[@]}" https://api.hamsterkombatgame.io/interlude/sync | jq -r '.interludeUser.balanceDiamonds')   
-        
-        # Get all available items
-        available_items=$(get_available_items)
-        
-        # Loop through the available items to find a non-ignored one
-        best_item=""
-        for item in $(echo "$available_items" | jq -c '.[]'); do
-            best_item_id=$(echo "$item" | jq -r '.id')
-            if ! is_ignored "$best_item_id"; then
-                best_item="$item"
-                break
-            else
-                echo -e "${yellow}Skipping ignored card with ID '${cyan}$best_item_id${yellow}'.${rest}"
-            fi
-        done
-        
-        if [ -z "$best_item" ]; then
-            echo -e "${red}No valid item found to buy.${rest}"
-            break
-        fi
-        
-        # Extract item details
+        # Get the best item to buy
+        best_item=$(get_best_item)
         best_item_id=$(echo "$best_item" | jq -r '.id')
         section=$(echo "$best_item" | jq -r '.section')
         price=$(echo "$best_item" | jq -r '.price')
