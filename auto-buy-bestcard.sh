@@ -64,6 +64,20 @@ echo -e "${purple}============================${rest}"
 echo -en "${green}Enter minimum balance threshold (${yellow}the script will stop purchasing if the balance is below this amount${green}):${rest} "
 read -r min_balance_threshold
 
+# List of ignored card IDs
+ignored_card_ids=("int_year_strategy") # Add more IDs as necessary
+
+# Function to check if an ID is in the ignored list
+is_ignored() {
+    local id="$1"
+    for ignored_id in "${ignored_card_ids[@]}"; do
+        if [[ "$id" == "$ignored_id" ]]; then
+            return 0 # Card is in the ignored list
+        fi
+    done
+    return 1 # Card is not in the ignored list
+}
+
 # Function to define common headers
 headers=(
     -H 'accept: application/json'
@@ -106,13 +120,28 @@ get_best_item() {
         .upgradesForBuy | 
         map(select(.isExpired == false and .isAvailable)) | 
         if any(.price == 0) then 
-            map(select(.price == 0)) | .[1] 
+            map(select(.price == 0)) | .[0] 
         else 
             map(select(.profitPerHourDelta != 0 and .price > 0) | . + {profitToPrice: (.profitPerHour / .price)}) | 
             sort_by(-(.profitPerHourDelta / .price)) | 
             .[1] 
         end | 
         {id: .id, section: .section, price: .price, profitPerHourDelta: .profitPerHourDelta, cooldownSeconds: .cooldownSeconds}
+    '
+}
+
+# Function to get all available items
+get_available_items() {
+    response=$(curl -s -X POST "${headers[@]}" https://api.hamsterkombatgame.io/interlude/upgrades-for-buy)
+    echo "$response" | jq -r '
+        .upgradesForBuy | 
+        map(select(.isExpired == false and .isAvailable)) | 
+        if any(.price == 0) then 
+            map(select(.price == 0)) 
+        else 
+            map(select(.profitPerHourDelta != 0 and .price > 0) | . + {profitToPrice: (.profitPerHour / .price)}) | 
+            sort_by(-(.profitPerHourDelta / .price)) 
+        end
     '
 }
 
