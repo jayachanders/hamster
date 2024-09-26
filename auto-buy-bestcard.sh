@@ -119,12 +119,9 @@ get_best_item() {
     echo "$response" | jq -r '
         .upgradesForBuy | 
         map(select(.isExpired == false and .isAvailable)) | 
-        if any(.price == 0) then 
-            map(select(.price == 0)) | .[0] 
-        else 
-            map(select(.profitPerHourDelta != 0 and .price > 0) | . + {profitToPrice: (.profitPerHour / .price)}) | 
-            sort_by(-(.profitPerHourDelta / .price)) | 
-            .[1] 
+        map(select(.profitPerHourDelta != 0 and .price > 0) | . + {profitToPrice: (.profitPerHour / .price)}) | 
+        sort_by(-(.profitPerHourDelta / .price)) | 
+        .[0] 
         end | 
         {id: .id, section: .section, price: .price, profitPerHourDelta: .profitPerHourDelta, cooldownSeconds: .cooldownSeconds}
     '
